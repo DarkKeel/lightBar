@@ -1,5 +1,4 @@
 //определение пинов радиомодуля
-#define BTN_PIN 8       // при любом нажатии кнопок пульта
 #define BTN_A 10        // пин кнопки А
 #define BTN_B 12        // пин кнопки B
 #define BTN_C 9         // пин кнопки C
@@ -7,7 +6,6 @@
 
 // Создаем объекты кнопок 
 #include "GyverButton.h"
-GButton buttClick(BTN_PIN);
 GButton bA(BTN_A);
 GButton bB(BTN_B);
 GButton bC(BTN_C);
@@ -41,6 +39,7 @@ uint32_t colorsLight[] = {
 mGradient<5> myGrad;         // Объект массива градиента пламени (красный/желтый)
 mGradient<4> myGrad2;       // Объект массива градиента пламени (фиолетовый/зеленый)
 
+// старый режим пламени
 #define HUE_GAP 21      // заброс по hue
 #define FIRE_STEP 10    // шаг огня
 #define HUE_START 0     // начальный цвет огня (0 красный, 80 зелёный, 140 молния, 190 розовый)
@@ -61,55 +60,52 @@ byte rainbowSpeed = EEPROM.read(4); // Скорость радуги
 byte flameSpeed = EEPROM.read(5); // Скорость пламени
 byte flashSpeed = EEPROM.read(6); // Скорость изменения цвета
 
-long lastSave;           // Время последнего сохранения
-bool isChanged = false;   // Было ли изменение
+long lastPressedButton;           // Время последнего нажатия кнопки
+bool isChanged;   // Было ли изменение
 int tempK;              // Температура в Кельвинах
 int countFlame;     // Пламя
-int counter2 = 0;
+int counterFlameOld; // Пламя (Старый)
 
-#define FOR_i(from, to) for(int i = (from); i < (to); i++)
-#define FOR_j(from, to) for(int j = (from); j < (to); j++)
 void setup() {
   Serial.begin(9600);   // Подключаем сериал порт
   // указываем подтяжку кнопок LOW_PULL - подтяжка на корпус, HIGH_PULL - к питанию
-  buttClick.setType(LOW_PULL);
   bA.setType(LOW_PULL);
   bB.setType(LOW_PULL);
   bC.setType(LOW_PULL);
   bD.setType(LOW_PULL);
   // устанавливаем защиту от дребезка кнопок
-  buttClick.setDebounce(20);
   bA.setDebounce(20);
   bB.setDebounce(20);
   bC.setDebounce(20);
   bD.setDebounce(20);
 
-  lastSave = millis(); // инициализируем время последнего сохранения
+  lastPressedButton = millis(); // инициализируем время последнего сохранения
 
 // необходимый градиент цветов пламя (красный/желтый)
-  myGrad.colors[0] = mBlack;
+  myGrad.colors[0] = 0x000000;
   myGrad.colors[1] = 0xFF0000;
-  myGrad.colors[2] = mYellow;
+  myGrad.colors[2] = 0xFF8000;
   myGrad.colors[3] = 0xFE9A2E;
   myGrad.colors[4] = 0xF3F781;
 
 // необходимый градиент цветов пламя (зеленый/фиолетовый)
-  myGrad2.colors[0] = mBlack;
-  myGrad2.colors[1] = mMagenta;
-  myGrad2.colors[2] = mGreen;
-  myGrad2.colors[3] = mWhite;
+  myGrad2.colors[0] = 0x000000;
+  myGrad2.colors[1] = 0xFF00FF;
+  myGrad2.colors[2] = 0x008000;
+  myGrad2.colors[3] = 0xFFFFFF;
 }
 
 void loop() {
 // опрос состояния кнопок при каждом цикле
-  buttClick.tick();
   bA.tick();
   bB.tick();
   bC.tick();
   bD.tick();
 
   if (isChanged) SaveData(); // если была нажата кнопка - сохраняем данные
-  
+
+  strip.setBrightness(brightness);
+  strip.clear();
   switch(modeSelected) {    // выбор режима свечения
     case 0: 
       Mode1();  // цвет из массива
@@ -133,26 +129,26 @@ void loop() {
       Mode7();
       break;
   }
-
+  
 // если зажата кнопка А на пульте, повышаем яркость до максимума - 255
   if (bA.isPress()) {    
     if ((255 - brightness) > 50) brightness += 50;
     else brightness = 255;
-    isChanged = true;
+    ButtonPressed();
     Serial.print("A Brightness: "); Serial.println(brightness);
   }
 // если зажата кнопка B на пульте, меняем режим свечения (1-6)
   if (bB.isPress()) {
     modeSelected++;
     if (modeSelected > 6) modeSelected = 0;
-    isChanged = true;
+    ButtonPressed();
     Serial.print("B Mode: "); Serial.println(modeSelected);
   }
 // если зажата кнопка C на пульте, понижаем яркость до минимума - 0
   if (bC.isPress()) {
     if ((brightness - 50) > 0) brightness -= 50;
     else brightness = 0;
-    isChanged = true;
+    ButtonPressed();
     Serial.print("C Brightness: "); Serial.println(brightness);
   }
 // если зажата кнопка D на пульте, в зависимости от выбранного режима меняем настройки
@@ -177,84 +173,56 @@ void loop() {
         FlameSpeedSet();   // изменяем скорость пламя
         break;
     }
-    isChanged = true;
+    ButtonPressed();
   }
-// если была нажата любая кнопка - меняем фалг сохранения данных
-//  if (buttClick.isClick()) {
-//    Serial.print("Changes throught : "); Serial.println((millis() - lastSave)/1000);
-//    isChanged = true;
-//  }
-
-
- 
-  
 }
 
 void Mode1() {  // цвет из массива
-  strip.setBrightness(brightness);
-  strip.clear();
   strip.fill(colorsLight[colorSelected]);  // заливаем цветом
-  strip.show();         // выводим изменения
-  delay(1);
+  ShowAndDelay(10);
 }
 
 void Mode2() { // цвет по тепловой шкале
-  strip.setBrightness(brightness);
-  strip.clear();
   tempK = map(tempSelected, 0, 255, 2050, 3750);
   for (int i = 0; i < NUMLEDS; i++) {
     strip.set(i, mKelvin(tempK));
   }
-  strip.show();
-  delay(10);
+  ShowAndDelay(10);
 }
 
 void Mode3() { // бегущая радуга
-  strip.setBrightness(brightness);
-  strip.clear();
   static byte counter = 0;
   byte speedR = map(rainbowSpeed, 0, 255, 0, 15);
   for (int i = 0; i < NUMLEDS; i++) {
     strip.set(i, mWheel8(counter + i * 255 / NUMLEDS));   // counter смещает цвет
   }
   counter += speedR;   // counter имеет тип byte и при достижении 255 сбросится в 0
-  strip.show();
-  delay(100);
+  ShowAndDelay(100);
 }
 
 void Mode4() {  // мерцание
-  strip.setBrightness(brightness);
-  strip.clear();
   static byte counter = 0;
   strip.fill(mWheel8(counter));
   counter += 1;
-  strip.show();
   int delayTime = map(flashSpeed, 0, 255, 5, 100);
-  delay(delayTime);
+  ShowAndDelay(delayTime);
 }
 
 void Mode5() {  // пламя
-  strip.setBrightness(brightness);
-  strip.clear();
   for (int i = 0; i < NUMLEDS; i++) {
     strip.leds[i] = myGrad.get(inoise8(i * 20, countFlame), 255);
   }
   byte speedF = map(flameSpeed, 0, 255, 5, 30);
-    countFlame += speedF;
-    strip.show();
-    delay(40);
-  
+  countFlame += speedF;
+  ShowAndDelay(40);
 }
 void Mode6() {  // пламя
-  strip.setBrightness(brightness);
-  strip.clear();
   for (int i = 0; i < NUMLEDS; i++) {
     strip.leds[i] = myGrad2.get(inoise8(i * 25, countFlame), 255);
   }
   byte speedF = map(flameSpeed, 0, 255, 5, 30);
-    countFlame += speedF;
-    strip.show();
-    delay(40);
+  countFlame += speedF;
+  ShowAndDelay(40);
 }
 
 void Mode7() {
@@ -262,16 +230,15 @@ void Mode7() {
   if (millis() - prevTime > 50) {
     prevTime = millis();
     int thisPos = 0, lastPos = 0;
-    FOR_i(0, NUMLEDS) {
-      int val = (inoise8(i * FIRE_STEP, counter2)); 
+    for (int i = 0; i < NUMLEDS; i++) {
+      int val = (inoise8(i * FIRE_STEP, counterFlameOld)); 
       strip.leds[i] = mHSV(
-           HUE_START + map(val, 0, 255, 0, HUE_GAP),                    // H
-           constrain(map(val, 0, 255, MAX_SAT, MIN_SAT), 0, 255),       // S
-           //constrain(map(val, 0, 255, MIN_BRIGHT, MAX_BRIGHT), 0, 255)  // V
-           brightness
+         HUE_START + map(val, 0, 255, 0, HUE_GAP),                    // H
+         constrain(map(val, 0, 255, MAX_SAT, MIN_SAT), 0, 255),       // S
+         brightness                                                   // V
          );
     }
-    counter2 += 20;
+    counterFlameOld += 20;
     strip.show();
   }
 }
@@ -306,8 +273,20 @@ void FlameSpeedSet() {
   else flameSpeed = 0;
   Serial.print("D FlameSpeed: "); Serial.println(flameSpeed);
 }
+
+void ButtonPressed() {
+  lastPressedButton = millis();
+  isChanged = true;
+}
+
+void ShowAndDelay(int delayTime) {
+  strip.show();         // выводим изменения на ленту
+  delay(delayTime);
+}
+
+
 void SaveData() {
-  if ((millis() - lastSave) > 10000) {    // если с последнего сохранения прошло больше 10 секунд
+  if ((millis() - lastPressedButton) > 10000) {    // если с последнего сохранения прошло больше 10 секунд
     EEPROM.write(0, modeSelected);
     delay(1);
     EEPROM.write(1, brightness);
@@ -321,7 +300,6 @@ void SaveData() {
     EEPROM.write(5, flameSpeed);
     delay(1);
     EEPROM.write(6, flashSpeed);
-    lastSave = millis();
     Serial.println("Saved!");
     isChanged = false;
   }
